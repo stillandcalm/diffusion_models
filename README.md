@@ -16,7 +16,7 @@
 
 ---
 
-## 1. Introduction: The AI Image Revolution {#introduction}
+## 1. Introduction: The AI Image Revolution
 
 Imagine typing "A majestic dragon flying over a medieval castle at sunset" and watching as an AI creates a stunning, detailed image that perfectly captures your vision. This isn't science fiction—it's the reality of modern diffusion models like Stable Diffusion, DALL-E, and Midjourney.
 
@@ -33,7 +33,7 @@ This simple pipeline involves sophisticated mathematics, clever training strateg
 
 ---
 
-## 2. First Principles: Embeddings vs Latent Spaces {#first-principles}
+## 2. First Principles: Embeddings vs Latent Spaces (first-principles)
 
 Before diving into diffusion models, we must clarify a fundamental confusion that trips up many students: the difference between embeddings and latent spaces.
 
@@ -126,7 +126,7 @@ for layer in transformer_layers:
 
 ---
 
-## 3. The Foundation: Variational Autoencoders {#the-foundation}
+## 3. The Foundation: Variational Autoencoders (the foundation)
 
 To understand diffusion models, we must first understand Variational Autoencoders (VAEs), which provide the organized latent space where diffusion happens.
 
@@ -269,7 +269,7 @@ latent [64×64×4] → VAE Decoder → image [512×512×3]
 
 ---
 
-## 4. The Architecture: Three Neural Networks Working Together {#the-architecture}
+## 4. The Architecture: Three Neural Networks Working Together (the architecture)
 
 Stable Diffusion consists of three main components, each handling a different aspect of text-to-image generation.
 
@@ -435,7 +435,7 @@ def cross_attention(image_features, text_embeddings):
 
 ---
 
-## 5. The Training Process: Learning to Predict Noise {#the-training-process}
+## 5. The Training Process: Learning to Predict Noise (the-training-process)
 
 The training process is where the magic happens. Unlike what you might expect, diffusion models don't learn to generate images directly—they learn to predict noise patterns.
 
@@ -648,7 +648,7 @@ def train_diffusion_model():
 
 ---
 
-## 6. The Generation Process: From Text to Image {#the-generation-process}
+## 6. The Generation Process: From Text to Image (the-generation-process)
 
 Now we can understand how trained diffusion models generate images from text prompts.
 
