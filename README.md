@@ -435,41 +435,296 @@ def cross_attention(image_features, text_embeddings):
 
 ---
 
-## 5. The Training Process: Learning to Predict Noise {#the-training-process}
+## 5. The Training Process: Three-Phase Foundation {#the-training-process}
 
-The training process is where the magic happens. Unlike what you might expect, diffusion models don't learn to generate images directly—they learn to predict noise patterns.
+Understanding diffusion model training requires recognizing that it's actually a **three-phase process** where different components are trained separately, then combined.
 
-### The Core Training Loop
+### The Complete Training Architecture
 
-**Common misconception:** "The model learns to denoise step by step on each image"
+**Phase 1: VAE Training (Weeks) - Create Organized Image Space**
+**Phase 2: CLIP Training (Months) - Learn Text-Image Understanding**  
+**Phase 3: U-Net Training (Weeks) - Learn Text-Guided Denoising**
 
-**Reality:** The model learns individual denoising steps on random noise levels across different images.
+Let's examine each phase in detail.
+
+---
+
+## Phase 1: VAE Training - Organizing Image Space
+
+### The Foundation: Why VAE First?
+
+Before we can do diffusion, we need an organized latent space. The VAE creates this foundation by learning to compress images while maintaining meaningful structure.
+
+### VAE Training Process
+
+#### Dataset Requirements
+```python
+vae_training_data = {
+    "size": "10-100 million images",
+    "resolution": "256×256 to 512×512",
+    "source": "LAION, ImageNet, custom collections", 
+    "diversity": "Wide variety of visual content",
+    "storage": "50-500 TB"
+}
+```
+
+#### Training Loop
+```python
+def train_vae_from_scratch():
+    # Initialize VAE architecture
+    vae = VAE(
+        input_channels=3,           # RGB images
+        latent_channels=4,          # 4-channel latent space
+        down_block_types=["DownEncoderBlock2D"] * 4,
+        up_block_types=["UpDecoderBlock2D"] * 4,
+        block_out_channels=(128, 256, 512, 512)
+    )
+    
+    optimizer = AdamW(vae.parameters(), lr=1e-4)
+    
+    # Training loop (2-4 weeks on 64 A100s)
+    for epoch in range(100):
+        for batch in image_dataloader:  # 256 images per batch
+            # Forward pass
+            posterior = vae.encode(batch)
+            latent = posterior.sample()
+            reconstructed = vae.decode(latent).sample
+            
+            # VAE loss function
+            reconstruction_loss = F.mse_loss(reconstructed, batch)
+            kl_loss = posterior.kl().mean()
+            
+            # Beta-VAE weighting for controlled compression
+            beta = 0.00025  # Tune this carefully
+            total_loss = reconstruction_loss + beta * kl_loss
+            
+            # Backpropagation
+            optimizer.zero_grad()
+            total_loss.backward()
+            optimizer.step()
+            
+            if step % 1000 == 0:
+                print(f"Reconstruction: {reconstruction_loss:.4f}, "
+                      f"KL: {kl_loss:.4f}")
+        
+        # Save checkpoint
+        torch.save(vae.state_dict(), f"vae_epoch_{epoch}.ckpt")
+```
+
+#### What VAE Learns
+```python
+# During training, VAE learns to:
+# 1. Compress images efficiently (512×512×3 → 64×64×4)
+# 2. Organize latent space (similar images → similar latents)
+# 3. Enable smooth interpolation (neighboring latents → similar images)
+# 4. Maintain reconstruction quality (latent → high-quality image)
+
+# The KL loss creates the N(0,1) organization:
+for image_type in ["cats", "dogs", "cars", "landscapes"]:
+    distribution = vae.encode(image_type).latent_dist
+    # Forces: distribution ≈ N(0, 1)
+    # Result: All concepts cluster around origin with unit variance
+```
+
+#### VAE Training Scale
+```python
+vae_resources = {
+    "hardware": "64 A100 GPUs",
+    "duration": "2-4 weeks", 
+    "cost": "$50,000-200,000",
+    "dataset": "50M+ diverse images",
+    "key_challenge": "Balancing compression vs quality"
+}
+```
+
+---
+
+## Phase 2: CLIP Training - Learning Text-Image Relationships
+
+### The Cross-Modal Foundation
+
+CLIP learns to connect text and images in a shared semantic space, providing the visual-linguistic understanding needed for text-guided generation.
+
+### CLIP Training Process
+
+#### Dataset Requirements
+```python
+clip_training_data = {
+    "size": "400M-5B text-image pairs",
+    "source": "Web-scraped (LAION-5B, COYO-700M)",
+    "quality": "Filtered for aesthetics and safety",
+    "diversity": "Multiple languages, cultures, concepts",
+    "storage": "500TB-5PB"
+}
+```
+
+#### Contrastive Training Loop
+```python
+def train_clip_from_scratch():
+    # Dual encoder architecture
+    text_encoder = CLIPTextTransformer(
+        vocab_size=49408,
+        max_position_embeddings=77,
+        hidden_size=768,
+        num_hidden_layers=12,
+        num_attention_heads=12
+    )
+    
+    image_encoder = CLIPVisionTransformer(
+        image_size=224,
+        patch_size=16,
+        hidden_size=768,
+        num_hidden_layers=12,
+        num_attention_heads=12
+    )
+    
+    # Massive-scale training (1-3 months on 256-1024 GPUs)
+    for epoch in range(32):
+        for batch in massive_dataloader:  # 32k+ samples per batch
+            texts, images = batch
+            
+            # Encode both modalities
+            text_features = text_encoder(texts)        # [32k, 768]
+            image_features = image_encoder(images)     # [32k, 768]
+            
+            # Normalize for cosine similarity
+            text_features = F.normalize(text_features, p=2, dim=1)
+            image_features = F.normalize(image_features, p=2, dim=1)
+            
+            # Contrastive loss matrix
+            temperature = 0.07
+            logits = text_features @ image_features.T / temperature
+            
+            # Labels: diagonal matrix (paired text-image should match)
+            labels = torch.arange(len(texts))
+            
+            # Symmetric loss
+            loss_text_to_image = F.cross_entropy(logits, labels)
+            loss_image_to_text = F.cross_entropy(logits.T, labels)
+            loss = (loss_text_to_image + loss_image_to_text) / 2
+            
+            # Backpropagation
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            if step % 1000 == 0:
+                # Measure text-image alignment
+                accuracy = (logits.argmax(dim=1) == labels).float().mean()
+                print(f"Loss: {loss:.4f}, Accuracy: {accuracy:.4f}")
+```
+
+#### What CLIP Learns
+```python
+# CLIP learns visual-semantic understanding:
+examples = {
+    "red car": "Associates word 'red' with red pixels AND 'car' with car shapes",
+    "flying bird": "Connects 'flying' with aerial poses AND 'bird' with bird anatomy",
+    "medieval castle": "Links 'medieval' with architectural period AND 'castle' with structures",
+    "sunset lighting": "Maps 'sunset' to warm colors AND 'lighting' to illumination patterns"
+}
+
+# Key insight: Not just linguistic understanding, but visual grounding!
+text_encoder_learns = {
+    "semantic_relationships": "King - man + woman ≈ queen",
+    "visual_concepts": "Red = warm color pixels, Flying = aerial positioning",
+    "compositional_understanding": "Red car = red pixels + car shapes",
+    "style_awareness": "Medieval = specific visual aesthetic"
+}
+```
+
+#### CLIP Training Scale
+```python
+clip_resources = {
+    "hardware": "256-1024 A100 GPUs", 
+    "duration": "1-3 months",
+    "cost": "$500,000-2,000,000",
+    "dataset": "400M-5B text-image pairs",
+    "batch_size": "32,768-65,536 samples",
+    "key_challenge": "Scaling contrastive learning"
+}
+```
+
+---
+
+## Phase 3: U-Net Diffusion Training - Connecting Everything
+
+Now we combine the pre-trained VAE and CLIP to train the U-Net for text-guided denoising.
+
+### The Integration Training Process
 
 ```python
-def training_step(text, clean_image):
-    # 1. Convert to latent space
-    clean_latent = vae_encoder(clean_image)      # [4×64×64]
-    text_embeddings = clip_text_encoder(text)    # [77×768] - FROZEN CLIP
+def train_unet_diffusion():
+    # Load pre-trained, frozen components
+    vae = load_pretrained_vae()
+    vae.requires_grad = False  # FROZEN
     
-    # 2. Add random amount of noise
-    timestep = random.randint(0, 999)            # Random noise level
-    noise = torch.randn_like(clean_latent)       # Random noise pattern
-    noisy_latent = scheduler.add_noise(
-        original_samples=clean_latent,
-        noise=noise,
-        timesteps=timestep
+    clip_text_encoder = load_pretrained_clip()
+    clip_text_encoder.requires_grad = False  # FROZEN
+    
+    # Initialize U-Net from scratch
+    unet = UNet2DConditionModel(
+        sample_size=64,                    # 64×64 latent space
+        in_channels=4,                     # VAE latent channels
+        out_channels=4,                    # Predict noise in same space
+        layers_per_block=2,
+        block_out_channels=(320, 640, 1280, 1280),
+        down_block_types=(
+            "CrossAttnDownBlock2D",        # Text cross-attention
+            "CrossAttnDownBlock2D", 
+            "CrossAttnDownBlock2D",
+            "DownBlock2D"
+        ),
+        up_block_types=(
+            "UpBlock2D",
+            "CrossAttnUpBlock2D",          # Text cross-attention
+            "CrossAttnUpBlock2D",
+            "CrossAttnUpBlock2D"
+        ),
+        cross_attention_dim=768            # CLIP text embedding dimension
     )
     
-    # 3. Train U-Net to predict the noise (guided by text)
-    predicted_noise = unet(
-        sample=noisy_latent,
-        timestep=timestep,
-        encoder_hidden_states=text_embeddings  # CLIP guidance
-    )
+    optimizer = AdamW(unet.parameters(), lr=1e-4)
+    scheduler = DDPMScheduler(num_train_timesteps=1000)
     
-    # 4. Loss: How well did we predict the added noise?
-    loss = F.mse_loss(predicted_noise, noise)
-    return loss
+    # Training loop (2-6 weeks on 128 A100s)
+    for step in range(595_000):  # ~500k steps for SD 1.5
+        batch = next(dataloader)  # 4096 text-image pairs
+        texts, images = batch
+        
+        # Process with frozen components
+        with torch.no_grad():
+            # CLIP provides semantic guidance
+            text_embeddings = clip_text_encoder(texts)     # [4096×77×768]
+            
+            # VAE provides organized latent space
+            latents = vae.encode(images).latent_dist.sample()  # [4096×4×64×64]
+            latents = latents * 0.18215  # VAE scaling factor
+        
+        # The noise injection training you identified:
+        timesteps = torch.randint(0, 1000, (len(images),))
+        noise = torch.randn_like(latents)
+        noisy_latents = scheduler.add_noise(latents, noise, timesteps)
+        
+        # Train U-Net to predict noise using text guidance
+        noise_pred = unet(
+            sample=noisy_latents,
+            timestep=timesteps,
+            encoder_hidden_states=text_embeddings  # Text guidance!
+        ).sample
+        
+        # Loss: How well did U-Net predict the added noise?
+        loss = F.mse_loss(noise_pred, noise)
+        
+        # Backpropagation (only U-Net updates)
+        optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(unet.parameters(), 1.0)
+        optimizer.step()
+        
+        if step % 5000 == 0:
+            print(f"Step {step}, Loss: {loss:.4f}")
+            torch.save(unet.state_dict(), f"unet_step_{step}.ckpt")
 ```
 
 ### Text Features as Noise Detection Guides
@@ -487,7 +742,7 @@ text_features = "dragon flying over castle"
 # Solution: Text tells U-Net what patterns to preserve vs remove
 ```
 
-### What the Model Learns Through Text Guidance
+### What U-Net Learns Through Integration Training
 
 ```python
 # U-Net learns to think:
@@ -521,6 +776,90 @@ def spatial_noise_detection(image_features, text_features):
             spatial_query, relevant_concepts
         )
 ```
+
+### U-Net Training Scale
+```python
+unet_resources = {
+    "hardware": "64-256 A100 GPUs",
+    "duration": "2-6 weeks", 
+    "cost": "$100,000-500,000",
+    "dataset": "100M-1B text-image pairs",
+    "batch_size": "2048-8192 samples",
+    "key_challenge": "Learning cross-modal spatial integration"
+}
+```
+
+---
+
+## The Complete Training Timeline
+
+### Resource Summary Across All Phases
+```python
+total_training_requirements = {
+    "Phase_1_VAE": {
+        "duration": "2-4 weeks",
+        "cost": "$50k-200k", 
+        "gpus": "64 A100s",
+        "dataset": "50M images"
+    },
+    "Phase_2_CLIP": {
+        "duration": "1-3 months", 
+        "cost": "$500k-2M",
+        "gpus": "256-1024 A100s", 
+        "dataset": "400M-5B text-image pairs"
+    },
+    "Phase_3_UNet": {
+        "duration": "2-6 weeks",
+        "cost": "$100k-500k",
+        "gpus": "64-256 A100s",
+        "dataset": "100M-1B text-image pairs"  
+    },
+    "Total": {
+        "duration": "4-7 months",
+        "cost": "$650k-2.7M", 
+        "peak_gpus": "1024 A100s"
+    }
+}
+```
+
+### Why This Three-Phase Approach Works
+
+```python
+training_wisdom = {
+    "Modularity": "Each component optimized for specific task",
+    "Efficiency": "Leverage existing knowledge, don't retrain everything",
+    "Stability": "Proven components reduce training risk", 
+    "Scalability": "Can upgrade individual components",
+    "Cost_effectiveness": "Much cheaper than training everything together"
+}
+```
+
+---
+
+## Single-Step vs Multi-Step Training Clarification
+
+### Why Single-Step Training Works
+
+**Common misconception:** "The model learns to denoise step by step on each image"
+
+**Reality:** The model learns individual denoising steps on random noise levels across different images.
+
+```python
+# Efficient single-step training:
+for text, image in dataset:
+    timestep = random.randint(0, 999)  # Random noise level
+    train_single_denoising_step(text, image, timestep)
+
+# vs. Inefficient multi-step training:
+for text, image in dataset:
+    for timestep in [999, 998, ..., 1, 0]:  # All steps per image
+        train_single_denoising_step(text, image, timestep)  # 50x slower!
+```
+
+This single-step approach is more effective because:
+1. **Computational efficiency**: 50x faster training
+2. **Better generalization**: Sees diverse (image, noise_level) combinations  
+3. **Statistical coverage**: Eventually covers all combinations through random sampling
 
 ### Why Single-Step Training Works
 
